@@ -17,7 +17,7 @@
 
 // ---------- Hardware ----------
 constexpr uint8_t BUTTON_PIN = A0;
-constexpr uint8_t OLED_ADDRESS = 0x3C;
+constexpr uint8_t OLED_ADDRESS = 0x3D;
 constexpr int8_t OLED_RESET_PIN = -1;
 constexpr uint8_t OLED_SDA_PIN = 41;  // STEMMA QT SDA1
 constexpr uint8_t OLED_SCL_PIN = 40;  // STEMMA QT SCL1
@@ -38,6 +38,7 @@ constexpr uint16_t ROUND_MINIMUM_MS = 3000;
 constexpr uint16_t INITIALS_STEP_MS = 450;
 constexpr uint16_t RESULT_SCREEN_MS = 4500;
 constexpr uint16_t LEADERBOARD_SCREEN_MS = 6000;
+constexpr uint16_t SERIAL_HEARTBEAT_MS = 5000;
 constexpr uint8_t SCORE_COUNT = 5;
 constexpr uint8_t HISTORY_SIZE = 20;
 
@@ -384,23 +385,85 @@ void updateButton(uint32_t now) {
 void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   Serial.begin(115200);
-  loadPersistentData();
 
-  Wire1.begin(OLED_SDA_PIN, OLED_SCL_PIN);
-  displayReady = display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS);
+  // Native USB serial may take a moment to reconnect after an upload or reset.
+  // Wait briefly so the boot banner is not sent before Serial Monitor is ready.
+  uint32_t serialWaitStarted = millis();
+  while (!Serial && millis() - serialWaitStarted < 2500) {
+    delay(10);
+  }
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("One Button Arcade is booting");
+  Serial.println("================================");
+  Serial.printf("Button: A0 (active LOW)\n");
+  Serial.printf("OLED: SSD1306 128x64 at 0x%02X\n", OLED_ADDRESS);
+  Serial.printf("STEMMA QT: SDA GPIO %u, SCL GPIO %u\n", OLED_SDA_PIN,
+                OLED_SCL_PIN);
+
+  loadPersistentData();
+  Serial.printf("Restored lifetime count: %llu\n",
+                static_cast<unsigned long long>(lifetimePresses));
+
+  bool i2cStarted = Wire1.begin(OLED_SDA_PIN, OLED_SCL_PIN);
+  Serial.printf("STEMMA QT I2C bus: %s\n", i2cStarted ? "started" : "FAILED");
+
+  uint8_t probeResult = 4;  // Arduino Wire: other/unknown error.
+  if (i2cStarted) {
+    Wire1.beginTransmission(OLED_ADDRESS);
+    probeResult = Wire1.endTransmission();
+  }
+
+  if (probeResult == 0) {
+    Serial.printf("I2C probe: device found at 0x%02X\n", OLED_ADDRESS);
+  } else {
+    Serial.printf("I2C probe: NO device at 0x%02X (Wire error %u)\n",
+                  OLED_ADDRESS, probeResult);
+
+    // Some SSD1306 modules use the alternate address. Report it to make a
+    // mismatched-address problem immediately visible in Serial Monitor.
+    if (i2cStarted) {
+      constexpr uint8_t alternateAddress = OLED_ADDRESS == 0x3C ? 0x3D : 0x3C;
+      Wire1.beginTransmission(alternateAddress);
+      uint8_t alternateResult = Wire1.endTransmission();
+      if (alternateResult == 0) {
+        Serial.printf("I2C probe: device found at 0x%02X; change OLED_ADDRESS to 0x%02X\n",
+                      alternateAddress, alternateAddress);
+      }
+    }
+  }
+
+  // Wire1 is already configured for the QT connector above. Passing false for
+  // periphBegin prevents the display library from calling Wire1.begin() again
+  // without the QT-specific pins.
+  displayReady = i2cStarted && probeResult == 0 &&
+                 display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS, true, false);
   if (!displayReady) {
     mode = ScreenMode::DISPLAY_ERROR;
-    Serial.println("SSD1306 OLED not found. Check wiring and address 0x3C.");
+    Serial.println("ERROR: SSD1306 startup failed. Check the I2C messages above.");
     return;
   }
 
   display.cp437(true);
   drawCounter();
+  Serial.println("OLED initialized and lifetime counter drawn.");
+  Serial.println("Boot complete. Ready for button presses.");
 }
 
 void loop() {
   uint32_t now = millis();
   updateButton(now);
+
+  // Keep proving that the sketch is alive even if Serial Monitor was opened
+  // after the one-time boot banner had already been sent.
+  static uint32_t lastHeartbeatAt = 0;
+  if (now - lastHeartbeatAt >= SERIAL_HEARTBEAT_MS) {
+    lastHeartbeatAt = now;
+    Serial.printf("HEARTBEAT: alive, lifetime=%llu, OLED=%s\n",
+                  static_cast<unsigned long long>(lifetimePresses),
+                  displayReady ? "ready" : "error");
+  }
 
   switch (mode) {
     case ScreenMode::SPEED_ROUND: {

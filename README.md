@@ -33,17 +33,23 @@ Plug the display into the QT Py's STEMMA QT connector. If the OLED has loose pin
 | `SDA` | `SDA1` (GPIO 41) |
 | `SCL` | `SCL1` (GPIO 40) |
 
-The sketch expects the common SSD1306 I2C address `0x3C`. If your display uses `0x3D`, change `OLED_ADDRESS` near the top of `OneButtonArcade.ino`.
+This Adafruit 128x64 SSD1306 display was detected at I2C address `0x3D`, which is configured near the top of `OneButtonArcade.ino`. The startup diagnostics automatically probe and report the alternate `0x3C` address if a different SSD1306 module is connected later.
 
 ## Arduino IDE setup
 
 1. Install the **esp32 by Espressif Systems** board package in Boards Manager.
 2. Install **Adafruit GFX Library** and **Adafruit SSD1306** in Library Manager. (Adafruit BusIO may be installed automatically.)
 3. Open `OneButtonArcade/OneButtonArcade.ino`.
-4. Select **Tools > Board > ESP32 > Adafruit QT Py ESP32-S3**.
-5. Select the board's USB port and click **Upload**.
+4. Select **Tools > Board > ESP32 > Adafruit QT Py ESP32-S3 No PSRAM**.
+5. Select **Tools > USB Mode > Hardware CDC and JTAG**.
+6. Select **Tools > USB CDC On Boot > Enabled**.
+7. Select **Tools > Upload Mode > UART0 / Hardware CDC**.
+8. Select the board's USB port and click **Upload**.
+9. Open Serial Monitor at **115200 baud**. If the port changes after uploading, select the new port and press Reset once.
 
 The ESP32 `Preferences` library is included with the ESP32 board package; it does not need a separate install.
+
+At startup, Serial Monitor reports the restored lifetime count, STEMMA QT bus status, whether an I2C device answers at `0x3D`, and whether the lifetime-counter screen was drawn. It then prints a `HEARTBEAT` line every five seconds. This makes display wiring, address, and startup problems visible even when the OLED remains blank or Serial Monitor was opened late.
 
 ## Playing
 
